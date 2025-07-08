@@ -39,7 +39,7 @@ You have access to the following tools:
 
 IMPORTANT RULES:
 - Your response MUST be a single, valid JSON object.
-- For any destructive action like deleting, you MUST first confirm with the user using the 'clarify' tool.
+- For ANY destructive action like 'deleteExpenseById' or 'deleteLastExpense', you MUST first confirm with the user by using the 'clarify' tool. Ask something like "Are you sure you want to delete the expense for [note]?"
 - If a user's request to update/delete is ambiguous, use 'listExpenses' first, then 'clarify' to ask them which item they meant.
 
 MULTI-STEP EXAMPLE:

@@ -20,6 +20,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { processUserRequest } from '../services/aiService';
 import * as AppFunctions from '../services/AppFunctions';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Enable LayoutAnimation on Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -38,6 +39,8 @@ const toolMapping = {
   updateExpense: AppFunctions.updateExpense,
   deleteExpenseById: AppFunctions.deleteExpenseById,
 };
+
+const CONVERSATION_KEY = '@conversation';
 
 // Optimized Shimmer Component
 const Shimmer = React.memo(({ width: shimmerWidth, height }) => {
@@ -315,10 +318,20 @@ export default function AgentScreen() {
     index,
   }), []);
 
-  // Enterprise welcome message loading
+  // MODIFIED: useEffect for welcome message / loading conversation
   useEffect(() => {
-    const getWelcomeMessage = async () => {
+    const loadInitialData = async () => {
       try {
+        // 1. Try to load an existing conversation
+        const savedConversation = await AsyncStorage.getItem(CONVERSATION_KEY);
+        if (savedConversation !== null && JSON.parse(savedConversation).length > 1) {
+          setConversation(JSON.parse(savedConversation));
+          setProcessingState(null);
+          return; // Exit if we loaded a conversation
+        }
+
+        // 2. If no conversation, fetch the welcome message (your existing logic)
+        setProcessingState({ type: 'welcome' });
         await new Promise(resolve => setTimeout(resolve, 1000));
         
         const todaysData = await AppFunctions.getSpendingHistory({ period: 'today' });
@@ -358,9 +371,16 @@ export default function AgentScreen() {
         ]);
       }
     };
+    loadInitialData();
+  }, []); // Runs only once
 
-    getWelcomeMessage();
-  }, []);
+  // NEW: useEffect to save conversation whenever it changes
+  useEffect(() => {
+    // We don't save the very initial empty state
+    if (conversation.length > 0) {
+      AsyncStorage.setItem(CONVERSATION_KEY, JSON.stringify(conversation));
+    }
+  }, [conversation]);
 
   // Enterprise-level message handling
   const handleUserSubmit = useCallback(async () => {
