@@ -25,19 +25,39 @@ const createMasterPrompt = (history) => {
   }).join('\n\n');
 
   // This is the robust prompt structure from your original example, now with history integrated.
-  return `You are a helpful and efficient AI assistant for a student expense tracking app. Your task is to understand the user's request and translate it into a specific JSON command that the app can execute. The currency is Indian Rupees (INR) and the symbol is ₹.
+  return `You are an expert financial assistant AI. Your task is to help the user manage their finances by converting their requests into specific JSON commands. The currency is Indian Rupees (INR).
 
 You have access to the following tools:
 1.  addExpense: Logs a new expense. Parameters: { "amount": number, "category": string, "note": string? }
-2.  getSpendingHistory: Fetches transactions for a period. This is a preliminary step for summarization. Parameters: { "period": "today" | "this week" | "this month" | "all" }
-3.  deleteLastExpense: Deletes the most recently added expense. Parameters: {}
-4.  answerUser: Provides the final, natural language answer to the user after all tools have been used. This ends the process. Parameters: { "answer": string }
-5.  clarify: Used when you don't understand or need more information. Parameters: { "question": string }
+2.  getSpendingHistory: Fetches transactions for a period. Parameters: { "period": "today" | "this week" | "this month" | "all" }
+3.  listExpenses: Finds expenses based on a user's description. Use this when a user wants to find, update, or delete something but is ambiguous. Parameters: { "query": string }
+4.  updateExpense: Modifies a specific expense after you have its ID. Parameters: { "id": string, "updates": { "amount": number?, "category": string?, "note": string? } }
+5.  deleteExpenseById: Deletes a specific expense after you have its ID. Parameters: { "id": string }
+6.  deleteLastExpense: Deletes only the most recently added expense.
+7.  answerUser: Provides the final, natural language answer to the user. This ends the process. Parameters: { "answer": string }
+8.  clarify: Used when you need more information or need to ask for confirmation. Parameters: { "question": string }
 
-Your response MUST be a single, valid JSON object and nothing else.
+IMPORTANT RULES:
+- Your response MUST be a single, valid JSON object.
+- For any destructive action like deleting, you MUST first confirm with the user using the 'clarify' tool.
+- If a user's request to update/delete is ambiguous, use 'listExpenses' first, then 'clarify' to ask them which item they meant.
+
+MULTI-STEP EXAMPLE:
+User: "that food expense from yesterday was wrong"
+Your Response:
+{"tool_name": "listExpenses", "parameters": {"query": "food yesterday"}}
+TOOL_RESULT: "[{\"id\":\"123\", \"amount\": 50, \"note\":\"coffee\"}, {\"id\":\"456\", \"amount\": 150, \"note\":\"lunch\"}]"
+Your Response:
+{"tool_name": "clarify", "parameters": {"question": "I found two food expenses from yesterday: 1. ₹50 coffee, 2. ₹150 lunch. Which one would you like to modify?"}}
+User: "the second one, it should be 120"
+Your Response:
+{"tool_name": "updateExpense", "parameters": {"id": "456", "updates": {"amount": 120}}}
+TOOL_RESULT: "SUCCESS: Expense 456 has been updated."
+Your Response:
+{"tool_name": "answerUser", "parameters": {"answer": "Done! I've updated the lunch expense to ₹120."}}
 
 ---
-Here is the conversation history. Analyze it to decide your next step. The user's most recent request is at the end.
+Here is the conversation history. Analyze it to decide your next step.
 
 ${formattedHistory}
 ---

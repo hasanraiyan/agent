@@ -81,6 +81,63 @@ export const deleteLastExpense = async () => {
   return `SUCCESS: Deleted expense of ₹${deletedExpense.amount} for ${deletedExpense.category}.`;
 };
 
+/**
+ * Finds expenses based on a simple text query.
+ * This is intentionally simple for the MVP. It just checks if the query
+ * string appears in the note or category.
+ */
+export const listExpenses = async ({ query }) => {
+  const expenses = await _readExpenses();
+  const lowerCaseQuery = query.toLowerCase();
+
+  const filtered = expenses.filter(e => {
+    const note = (e.note || '').toLowerCase();
+    const category = (e.category || '').toLowerCase();
+    return note.includes(lowerCaseQuery) || category.includes(lowerCaseQuery);
+  });
+
+  if (filtered.length === 0) {
+    return 'RESULT: No expenses found matching that description.';
+  }
+
+  // Return a JSON string so the AI can read the data and decide what to do next.
+  return JSON.stringify(filtered);
+};
+
+/**
+ * Updates a specific expense by its ID.
+ */
+export const updateExpense = async ({ id, updates }) => {
+  const expenses = await _readExpenses();
+  const expenseIndex = expenses.findIndex(e => e.id === id);
+
+  if (expenseIndex === -1) {
+    return `ERROR: Could not find an expense with ID ${id}.`;
+  }
+
+  // Merge the old expense data with the new updates
+  expenses[expenseIndex] = { ...expenses[expenseIndex], ...updates };
+  await _writeExpenses(expenses);
+
+  return `SUCCESS: Expense ${id} has been updated.`;
+};
+
+/**
+ * Deletes a specific expense by its ID.
+ */
+export const deleteExpenseById = async ({ id }) => {
+  const expenses = await _readExpenses();
+  const initialLength = expenses.length;
+  const expensesAfterDelete = expenses.filter(e => e.id !== id);
+
+  if (expensesAfterDelete.length === initialLength) {
+    return `ERROR: Could not find an expense with ID ${id}.`;
+  }
+
+  await _writeExpenses(expensesAfterDelete);
+  return `SUCCESS: Expense ${id} has been deleted.`;
+};
+
 // This is a pseudo-tool. It doesn't do anything but signal the end of a loop.
 export const answerUser = async ({ answer }) => {
   return answer;

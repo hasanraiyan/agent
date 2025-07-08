@@ -13,7 +13,7 @@ export default function App() {
         <Stack.Screen 
           name="ExpenseAgent" 
           component={AgentScreen} 
-          options={{ title: 'AI Expense Agent' }}
+          options={{ title: 'AI Expense Agent', headerShown: false }}
         />
       </Stack.Navigator>
     </NavigationContainer>
