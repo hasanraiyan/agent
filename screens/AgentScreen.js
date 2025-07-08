@@ -83,6 +83,7 @@ const MessageBubble = React.memo(({ item, index }) => {
   const isUser = item.role === 'user';
   const isSystem = item.role === 'system';
   const isTool = item.role === 'tool';
+  const isThinking = item.role === 'thinking';
 
   if (isUser) {
     return (
@@ -109,6 +110,24 @@ const MessageBubble = React.memo(({ item, index }) => {
               <Text style={styles.systemMessageText}>{item.content}</Text>
             </View>
             <Text style={styles.timestampLeft}>{item.timestamp}</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  if (isThinking) {
+    return (
+      <View style={styles.messageContainer}>
+        <View style={styles.systemMessageContainer}>
+          <View style={styles.assistantAvatar}>
+            <Ionicons name="sparkles" size={16} color="#2563EB" />
+          </View>
+          <View style={styles.thinkingBubbleContainer}>
+            <View style={styles.thinkingBubble}>
+              <View style={styles.thinkingDot} />
+              <Text style={styles.thinkingText}>{item.content}</Text>
+            </View>
           </View>
         </View>
       </View>
@@ -258,7 +277,6 @@ export default function AgentScreen() {
   const [userInput, setUserInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [conversation, setConversation] = useState([]);
-  const [processingState, setProcessingState] = useState({ type: 'welcome' });
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const flatListRef = useRef(null);
@@ -314,6 +332,45 @@ export default function AgentScreen() {
 
   const keyExtractor = useCallback((item, index) => `${item.role}-${index}`, []);
 
+  // Helper function to add thinking message
+  const addThinkingMessage = useCallback((message) => {
+    const thinkingMsg = {
+      id: `thinking-${Date.now()}`,
+      role: 'thinking',
+      content: message,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setConversation(prev => [...prev, thinkingMsg]);
+    return thinkingMsg.id;
+  }, []);
+
+  // Helper function to remove thinking message
+  const removeThinkingMessage = useCallback((thinkingId) => {
+    setConversation(prev => prev.filter(msg => msg.id !== thinkingId));
+  }, []);
+
+  // Helper function to update thinking message
+  const updateThinkingMessage = useCallback((thinkingId, newMessage) => {
+    setConversation(prev => prev.map(msg => 
+      msg.id === thinkingId ? { ...msg, content: newMessage } : msg
+    ));
+  }, []);
+
+  // Helper function to get tool display name
+  const getToolDisplayName = useCallback((toolName) => {
+    const toolNames = {
+      addExpense: 'Adding expense...',
+      getSpendingHistory: 'Getting spending history...',
+      deleteLastExpense: 'Deleting last expense...',
+      listExpenses: 'Listing expenses...',
+      updateExpense: 'Updating expense...',
+      deleteExpenseById: 'Deleting expense...',
+      answerUser: 'Preparing response...',
+      clarify: 'Preparing response...',
+    };
+    return toolNames[toolName] || `Processing: ${toolName}...`;
+  }, []);
+
   // MODIFIED: useEffect for welcome message / loading conversation
   useEffect(() => {
     const loadInitialData = async () => {
@@ -322,12 +379,11 @@ export default function AgentScreen() {
         const savedConversation = await AsyncStorage.getItem(CONVERSATION_KEY);
         if (savedConversation !== null && JSON.parse(savedConversation).length > 1) {
           setConversation(JSON.parse(savedConversation));
-          setProcessingState(null);
           return; // Exit if we loaded a conversation
         }
 
         // 2. If no conversation, fetch the welcome message (your existing logic)
-        setProcessingState({ type: 'welcome' });
+        const welcomeThinkingId = addThinkingMessage('Getting your expense summary...');
         await new Promise(resolve => setTimeout(resolve, 1000));
         
         const todaysData = await AppFunctions.getSpendingHistory({ period: 'today' });
@@ -346,7 +402,7 @@ export default function AgentScreen() {
           welcomeMessage = command.parameters.answer || command.parameters.question;
         }
         
-        setProcessingState(null);
+        removeThinkingMessage(welcomeThinkingId);
         setConversation([
           {
             id: Date.now().toString(),
@@ -356,7 +412,7 @@ export default function AgentScreen() {
           },
         ]);
       } catch (error) {
-        setProcessingState(null);
+        removeThinkingMessage(welcomeThinkingId);
         setConversation([
           {
             id: Date.now().toString(),
@@ -368,7 +424,7 @@ export default function AgentScreen() {
       }
     };
     loadInitialData();
-  }, []); // Runs only once
+  }, [addThinkingMessage, removeThinkingMessage]); // Runs only once
 
   // NEW: useEffect to save conversation whenever it changes
   useEffect(() => {
@@ -426,15 +482,15 @@ export default function AgentScreen() {
 
     try {
       for (let i = 0; i < MAX_STEPS; i++) {
-        setProcessingState({ type: 'ai', toolName: 'thinking...' });
+        const thinkingId = addThinkingMessage('Thinking...');
         
         const command = await processUserRequest(currentHistory);
-        setProcessingState({ type: 'ai', toolName: command.tool_name });
+        updateThinkingMessage(thinkingId, getToolDisplayName(command.tool_name));
         
         await new Promise(resolve => setTimeout(resolve, 200));
 
         if (command.tool_name === 'clarify' || command.tool_name === 'answerUser') {
-          setProcessingState(null);
+          removeThinkingMessage(thinkingId);
           
           const finalAnswer = {
             id: Date.now().toString(),
@@ -452,7 +508,7 @@ export default function AgentScreen() {
 
         const toolToCall = toolMapping[command.tool_name];
         if (!toolToCall) {
-          setProcessingState(null);
+          removeThinkingMessage(thinkingId);
           const errorTurn = {
             id: Date.now().toString(),
             role: 'system',
@@ -466,10 +522,8 @@ export default function AgentScreen() {
           break;
         }
 
-        setProcessingState({ type: 'tool' });
-
+        removeThinkingMessage(thinkingId);
         const toolResult = await toolToCall(command.parameters);
-        setProcessingState(null);
         
         const toolTurn = {
           id: Date.now().toString(),
@@ -498,7 +552,6 @@ export default function AgentScreen() {
         }
       }
     } catch (error) {
-      setProcessingState(null);
       const errorMessage = {
         id: Date.now().toString(),
         role: 'system',
@@ -510,10 +563,9 @@ export default function AgentScreen() {
       };
       setConversation(prev => [...prev, errorMessage]);
     } finally {
-      setProcessingState(null);
       setIsLoading(false);
     }
-  }, [userInput, isLoading, conversation]);
+  }, [userInput, isLoading, conversation, addThinkingMessage, removeThinkingMessage, updateThinkingMessage, getToolDisplayName]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -552,12 +604,7 @@ export default function AgentScreen() {
           windowSize={10}
         />
 
-        {processingState && (
-          <ProcessingIndicator 
-            type={processingState.type} 
-            toolName={processingState.toolName} 
-          />
-        )}
+        {/* Removed ProcessingIndicator as per new logic */}
 
         <View style={styles.inputContainer}>
           <ChatInput
@@ -874,5 +921,30 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
     overflow: 'hidden',
+  },
+
+  // Thinking messages
+  thinkingBubbleContainer: {
+    flex: 1,
+  },
+  thinkingBubble: {
+    maxWidth: width * 0.75,
+    borderRadius: 18,
+    borderBottomLeftRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  thinkingDot: {
+    width: 6,
+    height: 6,
+    backgroundColor: '#3B82F6',
+    borderRadius: 3,
+    marginRight: 8,
+  },
+  thinkingText: {
+    color: '#64748B',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
