@@ -5,7 +5,7 @@ const GEMINI_API_KEY = Constants.expoConfig.extra.GEMINI_API_KEY;
 
 // Using a general model name that is more likely to be available. 
 // The core logic works with any capable model, including Gemma variants.
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemma-3-27b-it:generateContent?key=${GEMINI_API_KEY}`;
+const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemma-3n-e2b-it:generateContent?key=${GEMINI_API_KEY}`;
 
 // This function now correctly builds upon your original, robust prompt structure.
 const createMasterPrompt = (history) => {
