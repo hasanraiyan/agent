@@ -125,7 +125,7 @@ const MessageBubble = React.memo(({ item, index }) => {
           </View>
           <View style={styles.thinkingBubbleContainer}>
             <View style={styles.thinkingBubble}>
-              <View style={styles.thinkingDot} />
+              {/* <View style={styles.thinkingDot} /> */}
               <Text style={styles.thinkingText}>{item.content}</Text>
             </View>
           </View>
@@ -135,16 +135,17 @@ const MessageBubble = React.memo(({ item, index }) => {
   }
 
   if (isTool) {
-    return (
-      <View style={styles.messageContainer}>
-        <View style={styles.toolMessageContainer}>
-          <View style={styles.toolBubble}>
-            <Ionicons name="checkmark-circle" size={14} color="#059669" />
-            <Text style={styles.toolResultText}>{item.content}</Text>
-          </View>
-        </View>
-      </View>
-    );
+    // return (
+    //   <View style={styles.messageContainer}>
+    //     <View style={styles.toolMessageContainer}>
+    //       <View style={styles.toolBubble}>
+    //         <Ionicons name="checkmark-circle" size={14} color="#059669" />
+    //         <Text style={styles.toolResultText}>{item.content}</Text>
+    //       </View>
+    //     </View>
+    //   </View>
+    // );
+    // Tool bubble rendering is commented out as per request.
   }
 
   return null;
