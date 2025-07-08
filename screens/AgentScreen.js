@@ -84,6 +84,12 @@ const MessageBubble = React.memo(({ item, index }) => {
   const isSystem = item.role === 'system';
   const isTool = item.role === 'tool';
   const isThinking = item.role === 'thinking';
+  // Detect clarify fallback (system message with clarify content)
+  const isClarify = isSystem && item.content && typeof item.content === 'string' && (
+    item.content.toLowerCase().includes('could you please provide additional details') ||
+    item.content.toLowerCase().includes('can you clarify') ||
+    item.content.toLowerCase().includes('need more information')
+  );
 
   if (isUser) {
     return (
@@ -98,6 +104,24 @@ const MessageBubble = React.memo(({ item, index }) => {
     );
   }
 
+  if (isClarify) {
+    // Special clarify fallback UI
+    return (
+      <View style={styles.messageContainer}>
+        <View style={styles.systemMessageContainer}>
+          <View style={styles.assistantAvatar}>
+            <Ionicons name="help-circle" size={16} color="#F59E42" />
+          </View>
+          <View style={styles.systemBubbleContainer}>
+            <View style={styles.clarifyBubble}>
+              <Text style={styles.clarifyText}>{item.content}</Text>
+            </View>
+            <Text style={styles.timestampLeft}>{item.timestamp}</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
   if (isSystem) {
     return (
       <View style={styles.messageContainer}>
@@ -273,6 +297,31 @@ const ProcessingIndicator = React.memo(({ type, toolName }) => {
 
   return null;
 });
+
+// Telemetry wrapper for tool calls
+const telemetryToolCall = async (toolName, toolFn, params) => {
+  const start = Date.now();
+  let result, success = false, error = null;
+  try {
+    result = await toolFn(params);
+    success = true;
+    return result;
+  } catch (err) {
+    error = err;
+    throw err;
+  } finally {
+    const duration = Date.now() - start;
+    console.log('[Telemetry]', {
+      tool: toolName,
+      durationMs: duration,
+      success,
+      result: success ? result : undefined,
+      error: error ? error.message : undefined,
+      params,
+      timestamp: new Date().toISOString(),
+    });
+  }
+};
 
 export default function AgentScreen() {
   const [userInput, setUserInput] = useState('');
@@ -523,9 +572,48 @@ export default function AgentScreen() {
           break;
         }
 
+        // Logic validation before tool call
+        let logicError = null;
+        if (command.tool_name === 'addExpense') {
+          const amount = Number(command.parameters.amount);
+          if (isNaN(amount) || amount <= 0) {
+            logicError = 'Expense amount must be greater than zero.';
+          }
+        }
+        if (command.tool_name === 'deleteExpenseById') {
+          // Check if any previous toolTurn in conversation is a listExpenses or getSpendingHistory with non-empty result
+          const hasExpenseList = conversation.some(msg =>
+            msg.role === 'tool' &&
+            ((msg.content && typeof msg.content === 'string' && msg.content.includes('Expense')) ||
+             (msg.content && Array.isArray(msg.content) && msg.content.length > 0))
+          );
+          if (!hasExpenseList) {
+            logicError = 'No expenses found to delete. Please list expenses first.';
+          }
+        }
+        if (logicError) {
+          removeThinkingMessage(thinkingId);
+          const errorTurn = {
+            id: Date.now().toString(),
+            role: 'system',
+            content: logicError,
+            timestamp: new Date().toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+          };
+          setConversation(prev => [...prev, errorTurn]);
+          break;
+        }
+
         removeThinkingMessage(thinkingId);
-        const toolResult = await toolToCall(command.parameters);
-        
+        // Telemetry-wrapped tool call
+        let toolResult;
+        try {
+          toolResult = await telemetryToolCall(command.tool_name, toolToCall, command.parameters);
+        } catch (err) {
+          toolResult = 'Tool execution failed.';
+        }
         const toolTurn = {
           id: Date.now().toString(),
           role: 'tool',
@@ -946,6 +1034,27 @@ const styles = StyleSheet.create({
   thinkingText: {
     color: '#64748B',
     fontSize: 14,
+    fontWeight: '500',
+  },
+  clarifyBubble: {
+    backgroundColor: '#FFF7ED',
+    borderRadius: 18,
+    borderBottomLeftRadius: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    maxWidth: width * 0.75,
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+    shadowColor: '#FDBA74',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  clarifyText: {
+    color: '#B45309',
+    fontSize: 16,
+    lineHeight: 22,
     fontWeight: '500',
   },
 });
