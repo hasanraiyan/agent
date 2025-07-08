@@ -5,7 +5,7 @@ const GEMINI_API_KEY = Constants.expoConfig.extra.GEMINI_API_KEY;
 
 // Using a general model name that is more likely to be available. 
 // The core logic works with any capable model, including Gemma variants.
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemma-3n-e2b-it:generateContent?key=${GEMINI_API_KEY}`;
+const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemma-3-27b-it:generateContent?key=${GEMINI_API_KEY}`;
 
 // This function now correctly builds upon your original, robust prompt structure.
 const createMasterPrompt = (history) => {
@@ -45,17 +45,24 @@ IMPORTANT RULES:
 MULTI-STEP EXAMPLE:
 User: "that food expense from yesterday was wrong"
 Your Response:
+\`\`\`json
 {"tool_name": "listExpenses", "parameters": {"query": "food yesterday"}}
+\`\`\`
 TOOL_RESULT: "[{\"id\":\"123\", \"amount\": 50, \"note\":\"coffee\"}, {\"id\":\"456\", \"amount\": 150, \"note\":\"lunch\"}]"
 Your Response:
+\`\`\`json
 {"tool_name": "clarify", "parameters": {"question": "I found two food expenses from yesterday: 1. ₹50 coffee, 2. ₹150 lunch. Which one would you like to modify?"}}
+\`\`\`
 User: "the second one, it should be 120"
 Your Response:
+\`\`\`json
 {"tool_name": "updateExpense", "parameters": {"id": "456", "updates": {"amount": 120}}}
+\`\`\`
 TOOL_RESULT: "SUCCESS: Expense 456 has been updated."
 Your Response:
+\`\`\`json
 {"tool_name": "answerUser", "parameters": {"answer": "Done! I've updated the lunch expense to ₹120."}}
-
+\`\`\`
 ---
 Here is the conversation history. Analyze it to decide your next step.
 
@@ -95,6 +102,10 @@ export const processUserRequest = async (history) => {
     }
 
     const aiResponseText = data.candidates[0].content.parts[0].text;
+    console.log("===============================================================");
+    console.log("AI Response Text:", aiResponseText);
+    console.log("===============================================================");
+
 
     // THIS IS THE CRITICAL STEP I MISSED. 
     // It makes the app resilient to the AI adding markdown wrappers.
