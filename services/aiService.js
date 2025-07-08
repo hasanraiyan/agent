@@ -1,17 +1,11 @@
 // services/aiService.js
 
 import Constants from "expo-constants";
-import { z } from "zod";
-
-// Load API key from Expo config
-const GEMINI_API_KEY = Constants.expoConfig.extra.GEMINI_API_KEY;
-// Endpoint for Gemma model
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemma-3-27b-it:generateContent?key=${GEMINI_API_KEY}`;
+import { z, ZodError } from "zod";
 
 // -----------------------------------------
 // Zod Schemas for Tool Validation
 // -----------------------------------------
-
 const addExpenseSchema = z.object({
   tool_name: z.literal("addExpense"),
   parameters: z.object({
@@ -20,21 +14,18 @@ const addExpenseSchema = z.object({
     note: z.string().optional(),
   }),
 });
-
 const getSpendingHistorySchema = z.object({
   tool_name: z.literal("getSpendingHistory"),
   parameters: z.object({
     period: z.enum(["today", "this week", "this month", "all"]),
   }),
 });
-
 const listExpensesSchema = z.object({
   tool_name: z.literal("listExpenses"),
   parameters: z.object({
     query: z.string(),
   }),
 });
-
 const updateExpenseSchema = z.object({
   tool_name: z.literal("updateExpense"),
   parameters: z.object({
@@ -46,145 +37,162 @@ const updateExpenseSchema = z.object({
     }),
   }),
 });
-
-const deleteExpenseByIdSchema = z.object({
+const deleteByIdSchema = z.object({
   tool_name: z.literal("deleteExpenseById"),
   parameters: z.object({
     id: z.string(),
   }),
 });
-
-const deleteLastExpenseSchema = z.object({
+const deleteLastSchema = z.object({
   tool_name: z.literal("deleteLastExpense"),
   parameters: z.object({}),
 });
-
-const answerUserSchema = z.object({
+const answerSchema = z.object({
   tool_name: z.literal("answerUser"),
   parameters: z.object({
     answer: z.string(),
   }),
 });
-
 const clarifySchema = z.object({
   tool_name: z.literal("clarify"),
   parameters: z.object({
     question: z.string(),
   }),
 });
-
-// Discriminated union of all possible tool responses
 const ToolSchema = z.discriminatedUnion("tool_name", [
   addExpenseSchema,
   getSpendingHistorySchema,
   listExpensesSchema,
   updateExpenseSchema,
-  deleteExpenseByIdSchema,
-  deleteLastExpenseSchema,
-  answerUserSchema,
+  deleteByIdSchema,
+  deleteLastSchema,
+  answerSchema,
   clarifySchema,
 ]);
 
-// -----------------------------------------
-// Build the system prompt with strict JSON enforcement
-// -----------------------------------------
-const createMasterPrompt = (history) => {
-  const formattedHistory = history
-    .map((turn) => {
-      if (turn.role === "user") {
-        return `User: "${turn.content.replace(/"/g, '\\"')}"`;
-      } else if (turn.role === "ai") {
-        return `Your Response:\n${JSON.stringify(turn.content, null, 2)}`;
-      } else {
-        return `TOOL_RESULT: "${turn.content.replace(/"/g, '\\"')}"`;
-      }
-    })
-    .join("\n\n");
+const GEMINI_API_KEY = Constants.expoConfig.extra.GEMINI_API_KEY;
+const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemma-3-27b-it:generateContent?key=${GEMINI_API_KEY}`;
 
-  return `You are an expert AI financial assistant designed solely to output a single valid JSON object per interaction. You do not speak in natural language unless using the answerUser or clarify tool.
+const schemaInfo = [
+  { name: 'addExpense', schema: addExpenseSchema },
+  { name: 'getSpendingHistory', schema: getSpendingHistorySchema },
+  { name: 'listExpenses', schema: listExpensesSchema },
+  { name: 'updateExpense', schema: updateExpenseSchema },
+  { name: 'deleteExpenseById', schema: deleteByIdSchema },
+  { name: 'deleteLastExpense', schema: deleteLastSchema },
+  { name: 'answerUser', schema: answerSchema },
+  { name: 'clarify', schema: clarifySchema },
+];
 
-RULES (No Exceptions):
-1. Output exactly one JSON object, with no commentary or markdown.
-2. Structure must be: { "tool_name": string, "parameters": { ... } }.
-3. For destructive or ambiguous actions, use clarify first.
-4. Only use these tools: addExpense, getSpendingHistory, listExpenses, updateExpense, deleteExpenseById, deleteLastExpense, answerUser, clarify.
-5. No extra text. No code blocks.
-
-AVAILABLE TOOLS:
-1. addExpense — Params: { amount: number, category: string, note?: string }
-2. getSpendingHistory — Params: { period: "today"|"this week"|"this month"|"all" }
-3. listExpenses — Params: { query: string }
-4. updateExpense — Params: { id: string, updates: { amount?: number, category?: string, note?: string } }
-5. deleteExpenseById — Params: { id: string } (confirm with clarify)
-6. deleteLastExpense — Params: {} (confirm with clarify)
-7. answerUser — Params: { answer: string }
-8. clarify — Params: { question: string }
-
-EXAMPLE:
-User: "that food expense from yesterday was wrong"
-→ { "tool_name": "listExpenses", "parameters": { "query": "food yesterday" } }
-
----
-Conversation History:
-${formattedHistory}
-
-JSON OUTPUT:`;
+const describeSchema = (schema) => {
+  const desc = schema.describe();
+  if (!desc || !desc.typeName || desc.typeName !== 'ZodObject') return '';
+  const fields = desc.value?.shape?.parameters?.shape;
+  if (!fields) return '';
+  return '{ ' + Object.entries(fields)
+    .map(([key, val]) => `${key}: ${val.typeName || val._def.typeName}`)
+    .join(', ') + ' }';
 };
 
-// -----------------------------------------
-// Main processing function
-// -----------------------------------------
+const createMasterPrompt = (history) => {
+  const formattedHistory = history.map(turn => {
+    if (turn.role === 'user') {
+      return `User: "${turn.content.replace(/"/g, '\\"')}"`;
+    } else if (turn.role === 'ai') {
+      return `Your Response:\n${JSON.stringify(turn.content)}`;
+    } else {
+      return `TOOL_RESULT: "${JSON.stringify(turn.content)}"`;
+    }
+  }).join('\n\n');
+
+  const toolDetails = schemaInfo.map(info =>
+    `TOOL: ${info.name}\nPARAMETERS: ${describeSchema(info.schema)}`
+  ).join('\n\n');
+
+  return `You are a JSON-only financial assistant. You must translate user messages into JSON tool calls.
+
+RESTRICTIONS:
+- Only output JSON. Never speak in natural language unless using the 'answerUser' or 'clarify' tool.
+- Use 'clarify' if anything is unclear.
+- Output a single valid JSON object every time, with only \"tool_name\" and \"parameters\" fields.
+
+TOOLS YOU CAN USE:
+${toolDetails}
+
+FEW-SHOT EXAMPLES:
+{ "tool_name": "addExpense", "parameters": { "amount": 200, "category": "groceries" } }
+{ "tool_name": "getSpendingHistory", "parameters": { "period": "this month" } }
+{ "tool_name": "clarify", "parameters": { "question": "Which transaction do you want to update?" } }
+{ "tool_name": "answerUser", "parameters": { "answer": "Your expense has been logged." } }
+
+CONVERSATION HISTORY:
+${formattedHistory}
+
+YOUR RESPONSE:`;
+};
+
 export const processUserRequest = async (history) => {
   const prompt = createMasterPrompt(history);
+  const MAX_RETRIES = 3;
 
-  try {
-    const response = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error("API Error Response:", errorBody);
-      throw new Error(`API request failed with status ${response.status}`);
-    }
-
-    const data = await response.json();
-    const aiResponseText = data.candidates[0]?.content.parts[0]?.text || "";
-    console.log("=================================")
-    console.log("AI Response:", aiResponseText);
-    console.log("=================================")
-
-
-    // Clean wrappers and isolate JSON
-    const cleanedJsonString = aiResponseText
-      .replace(/```json\n?/, "")
-      .replace(/```$/, "")
-      .replace(/^.*?{/, "{")
-      .replace(/}[^}]*$/, "}")
-      .trim();
-
-    // Parse and validate against Zod schema
-    let parsed;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      parsed = JSON.parse(cleanedJsonString);
-    } catch (parseErr) {
-      throw new Error("Failed to parse JSON from AI response");
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      });
+      if (!response.ok) throw new Error(`Status ${response.status}`);
+
+      const data = await response.json();
+      const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+      let jsonContent;
+      const codeMatch = aiText.match(/```json\s*([\s\S]*?)```/);
+      if (codeMatch) {
+        jsonContent = codeMatch[1];
+      } else {
+        const braceMatch = aiText.match(/\{[\s\S]*\}/);
+        jsonContent = braceMatch ? braceMatch[0] : aiText;
+      }
+
+      const parsed = JSON.parse(jsonContent.trim());
+      return ToolSchema.parse(parsed);
+
+    } catch (error) {
+      if (error instanceof ZodError) {
+        console.warn(`Validation failed (attempt ${attempt}):`, error.errors);
+      } else {
+        console.warn(`Attempt ${attempt} failed:`, error.message);
+      }
+      if (attempt === MAX_RETRIES) break;
+      await new Promise(res => setTimeout(res, 200 * attempt));
+    }
+  }
+
+  return {
+    tool_name: 'clarify',
+    parameters: { question: 'Sorry, I had trouble processing that request. Please rephrase.' },
+  };
+};
+
+export const handleUserRequest = async (userMessage, toolHandlers) => {
+  const history = [{ role: 'user', content: userMessage }];
+
+  while (true) {
+    const call = await processUserRequest(history);
+    if (['answerUser', 'clarify'].includes(call.tool_name)) {
+      return { call, history };
     }
 
-    // Validate structure
-    const validated = ToolSchema.parse(parsed);
-    return validated;
+    let result;
+    try {
+      result = await toolHandlers[call.tool_name](call.parameters);
+    } catch (execError) {
+      result = { error: execError.message };
+    }
 
-  } catch (error) {
-    console.error("Error processing AI request:", error);
-    // Fallback to clarification
-    return {
-      tool_name: "clarify",
-      parameters: {
-        question: "Sorry, I had trouble processing that request. Could you please rephrase?",
-      },
-    };
+    history.push({ role: 'ai', content: call });
+    history.push({ role: 'tool_result', content: JSON.stringify(result) });
   }
 };
