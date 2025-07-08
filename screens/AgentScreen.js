@@ -1,3 +1,4 @@
+// screens/AgentScreen.js
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
@@ -16,6 +17,7 @@ import {
   Keyboard,
   LayoutAnimation,
   UIManager,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { processUserRequest } from '../services/aiService';
@@ -262,17 +264,19 @@ export default function AgentScreen() {
   const flatListRef = useRef(null);
   const inputRef = useRef(null);
 
+  // Enterprise-level scroll management
+  const scrollToBottom = useCallback(() => {
+    if (flatListRef.current && conversation.length > 0) {
+      flatListRef.current.scrollToEnd({ animated: true });
+    }
+  }, [conversation.length]);
+
   // Enterprise-level keyboard management
   useEffect(() => {
     const keyboardWillShow = (event) => {
       const { height: kbHeight } = event.endCoordinates;
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setKeyboardHeight(kbHeight);
-      
-      // Auto-scroll to bottom when keyboard opens
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
     };
 
     const keyboardWillHide = () => {
@@ -280,16 +284,13 @@ export default function AgentScreen() {
       setKeyboardHeight(0);
     };
 
-    const keyboardDidShow = keyboardWillShow;
-    const keyboardDidHide = keyboardWillHide;
-
     const showSubscription = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      keyboardDidShow
+      keyboardWillShow
     );
     const hideSubscription = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      keyboardDidHide
+      keyboardWillHide
     );
 
     return () => {
@@ -298,12 +299,13 @@ export default function AgentScreen() {
     };
   }, []);
 
-  // Auto-scroll when new messages arrive
-  const scrollToEnd = useCallback(() => {
-    requestAnimationFrame(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    });
-  }, []);
+  // Auto-scroll whenever conversation changes (enterprise pattern)
+  useEffect(() => {
+    if (conversation.length > 0) {
+      const timeoutId = setTimeout(scrollToBottom, 50);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [conversation, scrollToBottom]);
 
   // Performance-optimized render functions
   const renderMessage = useCallback(({ item, index }) => (
@@ -311,12 +313,6 @@ export default function AgentScreen() {
   ), []);
 
   const keyExtractor = useCallback((item, index) => `${item.role}-${index}`, []);
-
-  const getItemLayout = useCallback((data, index) => ({
-    length: ITEM_HEIGHT,
-    offset: ITEM_HEIGHT * index,
-    index,
-  }), []);
 
   // MODIFIED: useEffect for welcome message / loading conversation
   useEffect(() => {
@@ -382,6 +378,28 @@ export default function AgentScreen() {
     }
   }, [conversation]);
 
+  // Clear conversation function
+  const clearConversation = useCallback(() => {
+    Alert.alert(
+      "Clear Conversation",
+      "Are you sure you want to clear all messages? This action cannot be undone.",
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: async () => {
+            setConversation([]);
+            await AsyncStorage.removeItem(CONVERSATION_KEY);
+          }
+        }
+      ]
+    );
+  }, []);
+
   // Enterprise-level message handling
   const handleUserSubmit = useCallback(async () => {
     if (!userInput.trim() || isLoading) return;
@@ -403,16 +421,12 @@ export default function AgentScreen() {
     setUserInput('');
     setIsLoading(true);
     
-    // Immediate scroll for better UX
-    setTimeout(scrollToEnd, 50);
-
     let currentHistory = [...conversation, userMessage];
     const MAX_STEPS = 5;
 
     try {
       for (let i = 0; i < MAX_STEPS; i++) {
         setProcessingState({ type: 'ai', toolName: 'thinking...' });
-        scrollToEnd();
         
         const command = await processUserRequest(currentHistory);
         setProcessingState({ type: 'ai', toolName: command.tool_name });
@@ -433,7 +447,6 @@ export default function AgentScreen() {
           };
           
           setConversation(prev => [...prev, finalAnswer]);
-          scrollToEnd();
           break;
         }
 
@@ -450,12 +463,10 @@ export default function AgentScreen() {
             }),
           };
           setConversation(prev => [...prev, errorTurn]);
-          scrollToEnd();
           break;
         }
 
         setProcessingState({ type: 'tool' });
-        scrollToEnd();
 
         const toolResult = await toolToCall(command.parameters);
         setProcessingState(null);
@@ -472,7 +483,6 @@ export default function AgentScreen() {
         
         currentHistory.push(toolTurn);
         setConversation(prev => [...prev, toolTurn]);
-        scrollToEnd();
 
         if (i === MAX_STEPS - 1) {
           const finalTurn = {
@@ -485,7 +495,6 @@ export default function AgentScreen() {
             }),
           };
           setConversation(prev => [...prev, finalTurn]);
-          scrollToEnd();
         }
       }
     } catch (error) {
@@ -500,12 +509,11 @@ export default function AgentScreen() {
         }),
       };
       setConversation(prev => [...prev, errorMessage]);
-      scrollToEnd();
     } finally {
       setProcessingState(null);
       setIsLoading(false);
     }
-  }, [userInput, isLoading, conversation, scrollToEnd]);
+  }, [userInput, isLoading, conversation]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -523,8 +531,8 @@ export default function AgentScreen() {
               <Text style={styles.headerSubtitle}>AI-powered expense management</Text>
             </View>
           </View>
-          <TouchableOpacity style={styles.headerAction} activeOpacity={0.7}>
-            <Ionicons name="ellipsis-horizontal" size={20} color="#6B7280" />
+          <TouchableOpacity style={styles.headerAction} activeOpacity={0.7} onPress={clearConversation}>
+            <Ionicons name="trash-outline" size={20} color="#6B7280" />
           </TouchableOpacity>
         </View>
       </View>
@@ -542,10 +550,6 @@ export default function AgentScreen() {
           initialNumToRender={10}
           maxToRenderPerBatch={5}
           windowSize={10}
-          getItemLayout={getItemLayout}
-          maintainVisibleContentPosition={{
-            minIndexForVisible: 0,
-          }}
         />
 
         {processingState && (
