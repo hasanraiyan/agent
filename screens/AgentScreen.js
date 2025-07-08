@@ -43,6 +43,7 @@ const toolMapping = {
 };
 
 const CONVERSATION_KEY = '@conversation';
+const ONBOARDING_KEY = '@onboardingTipDismissed';
 
 // Optimized Shimmer Component
 const Shimmer = React.memo(({ width: shimmerWidth, height }) => {
@@ -90,24 +91,76 @@ const MessageBubble = React.memo(({ item, index }) => {
     item.content.toLowerCase().includes('can you clarify') ||
     item.content.toLowerCase().includes('need more information')
   );
+  // Detect error (system message with error content)
+  const isError = isSystem && item.content && typeof item.content === 'string' && (
+    item.content.toLowerCase().includes('error') ||
+    item.content.toLowerCase().includes('failed') ||
+    item.content.toLowerCase().includes('something went wrong') ||
+    item.content.toLowerCase().includes('must be greater than zero') ||
+    item.content.toLowerCase().includes('no expenses found to delete')
+  );
+  // Detect tool success (tool message with non-error content)
+  const isSuccess = isTool && item.content && typeof item.content === 'string' && !item.content.toLowerCase().includes('failed');
+
+  // Fade-in animation for new messages
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 350,
+      useNativeDriver: true,
+    }).start();
+  }, []);
 
   if (isUser) {
     return (
-      <View style={styles.messageContainer}>
+      <Animated.View style={[styles.messageContainer, { opacity: fadeAnim }]}>
         <View style={styles.userMessageContainer}>
           <View style={styles.userBubble}>
             <Text style={styles.userMessageText}>{item.content}</Text>
           </View>
           <Text style={styles.timestamp}>{item.timestamp}</Text>
         </View>
-      </View>
+      </Animated.View>
+    );
+  }
+
+  if (isError) {
+    // Error message UI
+    return (
+      <Animated.View style={[styles.messageContainer, { opacity: fadeAnim }]}>
+        <View style={styles.systemMessageContainer}>
+          <View style={styles.assistantAvatar}>
+            <Ionicons name="alert-circle" size={16} color="#DC2626" />
+          </View>
+          <View style={styles.systemBubbleContainer}>
+            <View style={styles.errorBubble}>
+              <Text style={styles.errorText}>{item.content}</Text>
+            </View>
+            <Text style={styles.timestampLeft}>{item.timestamp}</Text>
+          </View>
+        </View>
+      </Animated.View>
+    );
+  }
+  if (isSuccess) {
+    // Success tool message UI
+    return (
+      <Animated.View style={[styles.messageContainer, { opacity: fadeAnim }]}>
+        <View style={styles.toolMessageContainer}>
+          <View style={styles.toolBubble}>
+            <Ionicons name="checkmark-circle" size={14} color="#059669" />
+            <Text style={styles.toolResultText}>{item.content}</Text>
+          </View>
+        </View>
+      </Animated.View>
     );
   }
 
   if (isClarify) {
     // Special clarify fallback UI
     return (
-      <View style={styles.messageContainer}>
+      <Animated.View style={[styles.messageContainer, { opacity: fadeAnim }]}>
         <View style={styles.systemMessageContainer}>
           <View style={styles.assistantAvatar}>
             <Ionicons name="help-circle" size={16} color="#F59E42" />
@@ -119,12 +172,12 @@ const MessageBubble = React.memo(({ item, index }) => {
             <Text style={styles.timestampLeft}>{item.timestamp}</Text>
           </View>
         </View>
-      </View>
+      </Animated.View>
     );
   }
   if (isSystem) {
     return (
-      <View style={styles.messageContainer}>
+      <Animated.View style={[styles.messageContainer, { opacity: fadeAnim }]}>
         <View style={styles.systemMessageContainer}>
           <View style={styles.assistantAvatar}>
             <Ionicons name="sparkles" size={16} color="#2563EB" />
@@ -136,7 +189,7 @@ const MessageBubble = React.memo(({ item, index }) => {
             <Text style={styles.timestampLeft}>{item.timestamp}</Text>
           </View>
         </View>
-      </View>
+      </Animated.View>
     );
   }
 
@@ -180,20 +233,20 @@ const MessageBubble = React.memo(({ item, index }) => {
 });
 
 // Enterprise Input Component with auto-resize
-const ChatInput = React.memo(({ 
-  value, 
-  onChangeText, 
-  onSubmit, 
-  disabled, 
-  isLoading 
+const ChatInput = React.memo(({
+  value,
+  onChangeText,
+  onSubmit,
+  disabled,
+  isLoading
 }) => {
   const [inputHeight, setInputHeight] = useState(44);
   const maxHeight = 120;
-  
+
   const handleContentSizeChange = useCallback((event) => {
     const { height: contentHeight } = event.nativeEvent.contentSize;
     const newHeight = Math.min(Math.max(44, contentHeight + 20), maxHeight);
-    
+
     if (newHeight !== inputHeight) {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setInputHeight(newHeight);
@@ -237,10 +290,10 @@ const ChatInput = React.memo(({
             <Shimmer width={20} height={20} />
           </View>
         ) : (
-          <Ionicons 
-            name="arrow-up" 
-            size={20} 
-            color={hasText && !disabled ? "#FFFFFF" : "#9CA3AF"} 
+          <Ionicons
+            name="arrow-up"
+            size={20}
+            color={hasText && !disabled ? "#FFFFFF" : "#9CA3AF"}
           />
         )}
       </TouchableOpacity>
@@ -328,6 +381,7 @@ export default function AgentScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [conversation, setConversation] = useState([]);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const flatListRef = useRef(null);
   const inputRef = useRef(null);
@@ -401,7 +455,7 @@ export default function AgentScreen() {
 
   // Helper function to update thinking message
   const updateThinkingMessage = useCallback((thinkingId, newMessage) => {
-    setConversation(prev => prev.map(msg => 
+    setConversation(prev => prev.map(msg =>
       msg.id === thinkingId ? { ...msg, content: newMessage } : msg
     ));
   }, []);
@@ -429,29 +483,32 @@ export default function AgentScreen() {
         const savedConversation = await AsyncStorage.getItem(CONVERSATION_KEY);
         if (savedConversation !== null && JSON.parse(savedConversation).length > 1) {
           setConversation(JSON.parse(savedConversation));
+          // Check onboarding tip state
+          const onboardingDismissed = await AsyncStorage.getItem(ONBOARDING_KEY);
+          setShowOnboarding(!onboardingDismissed);
           return; // Exit if we loaded a conversation
         }
 
         // 2. If no conversation, fetch the welcome message (your existing logic)
         const welcomeThinkingId = addThinkingMessage('Getting your expense summary...');
         await new Promise(resolve => setTimeout(resolve, 1000));
-        
+
         const todaysData = await AppFunctions.getSpendingHistory({ period: 'today' });
-        
+
         const primingHistory = [
-          { 
-            role: 'user', 
+          {
+            role: 'user',
             content: `The user has just opened the app. Here is their expense data for today: ${todaysData}. Please provide a friendly greeting and a brief, natural-language summary of their spending. If there are no expenses, just give a simple welcome.`
           }
         ];
 
         const command = await processUserRequest(primingHistory);
-        
+
         let welcomeMessage = "Welcome! How can I help with your expenses?";
         if (command.tool_name === 'answerUser' || command.tool_name === 'clarify') {
           welcomeMessage = command.parameters.answer || command.parameters.question;
         }
-        
+
         removeThinkingMessage(welcomeThinkingId);
         setConversation([
           {
@@ -461,6 +518,9 @@ export default function AgentScreen() {
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           },
         ]);
+        // Show onboarding tip on first launch
+        setShowOnboarding(true);
+        await AsyncStorage.removeItem(ONBOARDING_KEY);
       } catch (error) {
         removeThinkingMessage(welcomeThinkingId);
         setConversation([
@@ -471,6 +531,8 @@ export default function AgentScreen() {
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           },
         ]);
+        setShowOnboarding(true);
+        await AsyncStorage.removeItem(ONBOARDING_KEY);
       }
     };
     loadInitialData();
@@ -500,10 +562,18 @@ export default function AgentScreen() {
           onPress: async () => {
             setConversation([]);
             await AsyncStorage.removeItem(CONVERSATION_KEY);
+            setShowOnboarding(true);
+            await AsyncStorage.removeItem(ONBOARDING_KEY);
           }
         }
       ]
     );
+  }, []);
+
+  // Dismiss onboarding tip
+  const dismissOnboarding = useCallback(async () => {
+    setShowOnboarding(false);
+    await AsyncStorage.setItem(ONBOARDING_KEY, '1');
   }, []);
 
   // Enterprise-level message handling
@@ -514,34 +584,34 @@ export default function AgentScreen() {
       hour: '2-digit',
       minute: '2-digit',
     });
-    
-    const userMessage = { 
+
+    const userMessage = {
       id: Date.now().toString(),
-      role: 'user', 
-      content: userInput.trim(), 
-      timestamp 
+      role: 'user',
+      content: userInput.trim(),
+      timestamp
     };
-    
+
     // Optimistic UI update
     setConversation(prev => [...prev, userMessage]);
     setUserInput('');
     setIsLoading(true);
-    
+
     let currentHistory = [...conversation, userMessage];
     const MAX_STEPS = 5;
 
     try {
       for (let i = 0; i < MAX_STEPS; i++) {
         const thinkingId = addThinkingMessage('Thinking...');
-        
+
         const command = await processUserRequest(currentHistory);
         updateThinkingMessage(thinkingId, getToolDisplayName(command.tool_name));
-        
+
         await new Promise(resolve => setTimeout(resolve, 200));
 
         if (command.tool_name === 'clarify' || command.tool_name === 'answerUser') {
           removeThinkingMessage(thinkingId);
-          
+
           const finalAnswer = {
             id: Date.now().toString(),
             role: 'system',
@@ -551,7 +621,7 @@ export default function AgentScreen() {
               minute: '2-digit',
             }),
           };
-          
+
           setConversation(prev => [...prev, finalAnswer]);
           break;
         }
@@ -623,7 +693,7 @@ export default function AgentScreen() {
             minute: '2-digit',
           }),
         };
-        
+
         currentHistory.push(toolTurn);
         setConversation(prev => [...prev, toolTurn]);
 
@@ -680,6 +750,20 @@ export default function AgentScreen() {
 
       {/* Chat Container with enterprise keyboard handling */}
       <View style={[styles.container, { paddingBottom: keyboardHeight }]}>
+        {/* Onboarding Tip */}
+        {showOnboarding && (
+          <View style={styles.onboardingTipContainer}>
+            <View style={styles.onboardingTipBox}>
+              <Ionicons name="bulb-outline" size={18} color="#F59E42" style={{ marginRight: 8 }} />
+              <Text style={styles.onboardingTipText}>
+                Tip: You can ask me to add, list, or analyze your expenses. Try "Add an expense of 200 for groceries" or "Show my spending this week".
+              </Text>
+              <TouchableOpacity onPress={dismissOnboarding} style={styles.onboardingTipClose} accessibilityLabel="Dismiss onboarding tip">
+                <Ionicons name="close" size={16} color="#B45309" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
         <FlatList
           ref={flatListRef}
           data={conversation}
@@ -710,11 +794,11 @@ export default function AgentScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { 
-    flex: 1, 
-    backgroundColor: '#FFFFFF' 
+  safe: {
+    flex: 1,
+    backgroundColor: '#FFFFFF'
   },
-  container: { 
+  container: {
     flex: 1,
     backgroundColor: '#FAFAFA',
   },
@@ -764,12 +848,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
 
-  chatContent: { 
+  chatContent: {
     padding: 20,
     paddingBottom: 10,
     flexGrow: 1,
   },
-  messageContainer: { 
+  messageContainer: {
     marginBottom: 16,
   },
 
@@ -1056,5 +1140,58 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 22,
     fontWeight: '500',
+  },
+  errorBubble: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 18,
+    borderBottomLeftRadius: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    maxWidth: width * 0.75,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    shadowColor: '#FCA5A5',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  errorText: {
+    color: '#B91C1C',
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '500',
+  },
+  onboardingTipContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 0,
+  },
+  onboardingTipBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF7ED',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+    shadowColor: '#FDBA74',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  onboardingTipText: {
+    flex: 1,
+    color: '#B45309',
+    fontSize: 14,
+    fontWeight: '500',
+    marginRight: 8,
+  },
+  onboardingTipClose: {
+    padding: 4,
+    borderRadius: 8,
   },
 });
