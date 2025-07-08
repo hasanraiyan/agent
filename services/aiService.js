@@ -152,6 +152,10 @@ export const processUserRequest = async (history) => {
 
     const data = await response.json();
     const aiResponseText = data.candidates[0]?.content.parts[0]?.text || "";
+    console.log("=================================")
+    console.log("AI Response:", aiResponseText);
+    console.log("=================================")
+
 
     // Clean wrappers and isolate JSON
     const cleanedJsonString = aiResponseText
