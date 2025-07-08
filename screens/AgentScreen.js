@@ -31,23 +31,94 @@ const toolMapping = {
   deleteExpenseById: AppFunctions.deleteExpenseById,
 };
 
-// Simplified Message Component - No animations on existing messages
-const MessageBubble = React.memo(({ item, index, isLast }) => {
-  const fadeAnim = useRef(new Animated.Value(isLast ? 0 : 1)).current;
+// Shimmer Component
+const Shimmer = React.memo(({ width: shimmerWidth, height }) => {
+  const shimmerAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (isLast) {
-      Animated.timing(fadeAnim, {
+    const shimmer = Animated.loop(
+      Animated.timing(shimmerAnim, {
         toValue: 1,
-        duration: 300,
-        easing: Easing.out(Easing.ease),
+        duration: 1500,
+        easing: Easing.linear,
         useNativeDriver: true,
-      }).start();
-    }
-  }, [isLast]);
+      })
+    );
+    shimmer.start();
+    return () => shimmer.stop();
+  }, []);
+
+  const translateX = shimmerAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-shimmerWidth, shimmerWidth],
+  });
 
   return (
-    <Animated.View style={[styles.messageContainer, { opacity: fadeAnim }]}>
+    <View style={[styles.skeletonBase, { width: shimmerWidth, height }]}>
+      <Animated.View
+        style={[
+          styles.shimmerOverlay,
+          {
+            transform: [{ translateX }],
+          },
+        ]}
+      />
+    </View>
+  );
+});
+
+// Skeleton Message Bubble
+const SkeletonMessage = React.memo(() => {
+  return (
+    <View style={styles.skeletonContainer}>
+      <View style={styles.assistantAvatar}>
+        <Ionicons name="sparkles" size={16} color="#2563EB" />
+      </View>
+      <View style={styles.skeletonBubbleContainer}>
+        <View style={styles.skeletonBubble}>
+          <Shimmer width={width * 0.6} height={16} />
+          <View style={{ height: 8 }} />
+          <Shimmer width={width * 0.4} height={16} />
+          <View style={{ height: 8 }} />
+          <Shimmer width={width * 0.5} height={16} />
+        </View>
+      </View>
+    </View>
+  );
+});
+
+// AI Processing Indicator (temporary, not part of conversation history)
+const AIProcessingIndicator = React.memo(({ toolName }) => {
+  return (
+    <View style={styles.processingIndicatorContainer}>
+      <View style={styles.processingBubble}>
+        <View style={styles.processingDot} />
+        <Text style={styles.processingText}>Processing: {toolName}</Text>
+      </View>
+    </View>
+  );
+});
+
+// Tool Processing Skeleton
+const ToolProcessingSkeleton = React.memo(() => {
+  return (
+    <View style={styles.skeletonToolContainer}>
+      <View style={styles.skeletonToolBubble}>
+        <View style={styles.skeletonIcon}>
+          <Shimmer width={14} height={14} />
+        </View>
+        <View style={{ flex: 1, marginLeft: 6 }}>
+          <Shimmer width={width * 0.3} height={12} />
+        </View>
+      </View>
+    </View>
+  );
+});
+
+// Simplified Message Component
+const MessageBubble = React.memo(({ item, index }) => {
+  return (
+    <View style={styles.messageContainer}>
       {item.role === 'user' && (
         <View style={styles.userMessageContainer}>
           <View style={styles.userBubble}>
@@ -71,15 +142,6 @@ const MessageBubble = React.memo(({ item, index, isLast }) => {
         </View>
       )}
       
-      {item.role === 'ai' && (
-        <View style={styles.processingContainer}>
-          <View style={styles.processingBubble}>
-            <View style={styles.processingDot} />
-            <Text style={styles.processingText}>Processing: {item.content.tool_name}</Text>
-          </View>
-        </View>
-      )}
-      
       {item.role === 'tool' && (
         <View style={styles.toolMessageContainer}>
           <View style={styles.toolBubble}>
@@ -88,51 +150,12 @@ const MessageBubble = React.memo(({ item, index, isLast }) => {
           </View>
         </View>
       )}
-    </Animated.View>
-  );
-});
-
-// Simple Typing Indicator - No complex animations
-const TypingIndicator = React.memo(() => {
-  const opacity = useRef(new Animated.Value(0.4)).current;
-
-  useEffect(() => {
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacity, {
-          toValue: 0.4,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    pulse.start();
-    return () => pulse.stop();
-  }, []);
-
-  return (
-    <View style={styles.typingContainer}>
-      <View style={styles.assistantAvatar}>
-        <Ionicons name="sparkles" size={16} color="#2563EB" />
-      </View>
-      <View style={styles.typingBubble}>
-        <Animated.View style={[styles.typingDots, { opacity }]}>
-          <View style={styles.typingDot} />
-          <View style={styles.typingDot} />
-          <View style={styles.typingDot} />
-        </Animated.View>
-      </View>
     </View>
   );
 });
 
-// Simple Send Button - Minimal animation
-const SendButton = React.memo(({ onPress, disabled, hasText }) => {
+// Send Button with shimmer when loading
+const SendButton = React.memo(({ onPress, disabled, hasText, isLoading }) => {
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -142,11 +165,17 @@ const SendButton = React.memo(({ onPress, disabled, hasText }) => {
         hasText && !disabled ? styles.sendButtonActive : styles.sendButtonInactive,
       ]}
       activeOpacity={0.8}>
-      <Ionicons 
-        name="arrow-up" 
-        size={20} 
-        color={hasText && !disabled ? "#FFFFFF" : "#9CA3AF"} 
-      />
+      {isLoading ? (
+        <View style={styles.sendButtonLoader}>
+          <Shimmer width={20} height={20} />
+        </View>
+      ) : (
+        <Ionicons 
+          name="arrow-up" 
+          size={20} 
+          color={hasText && !disabled ? "#FFFFFF" : "#9CA3AF"} 
+        />
+      )}
     </TouchableOpacity>
   );
 });
@@ -154,25 +183,56 @@ const SendButton = React.memo(({ onPress, disabled, hasText }) => {
 export default function AgentScreen() {
   const [userInput, setUserInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [conversation, setConversation] = useState([
-    {
-      role: 'system',
-      content: 'Welcome! I\'m here to help you manage your expenses efficiently.',
-      timestamp: new Date().toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-    },
-  ]);
+  const [conversation, setConversation] = useState([]);
+  const [showSkeletonWelcome, setShowSkeletonWelcome] = useState(true);
+  const [processingState, setProcessingState] = useState(null); // { type: 'ai', toolName: string } or { type: 'tool' } or null
 
   const flatListRef = useRef();
   const hasText = useMemo(() => userInput.trim().length > 0, [userInput]);
 
-  // Simple scroll to end - no requestAnimationFrame
   const scrollToEnd = useCallback(() => {
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
+  }, []);
+
+  useEffect(() => {
+    const getWelcomeMessage = async () => {
+      setShowSkeletonWelcome(true);
+      setIsLoading(true);
+      
+      // Simulate a minimum loading time for better UX
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      const todaysData = await AppFunctions.getSpendingHistory({ period: 'today' });
+
+      const primingHistory = [
+        { 
+          role: 'user', 
+          content: `The user has just opened the app. Here is their expense data for today: ${todaysData}. Please provide a friendly greeting and a brief, natural-language summary of their spending. If there are no expenses, just give a simple welcome.`
+        }
+      ];
+
+      const command = await processUserRequest(primingHistory);
+      
+      let welcomeMessage = "Welcome! How can I help with your expenses?";
+      if (command.tool_name === 'answerUser' || command.tool_name === 'clarify') {
+          welcomeMessage = command.parameters.answer || command.parameters.question;
+      }
+      
+      setShowSkeletonWelcome(false);
+      setConversation([
+        {
+          role: 'system',
+          content: welcomeMessage,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+
+      setIsLoading(false);
+    };
+
+    getWelcomeMessage();
   }, []);
 
   const handleUserSubmit = useCallback(async () => {
@@ -199,21 +259,23 @@ export default function AgentScreen() {
 
     try {
       for (let i = 0; i < MAX_STEPS; i++) {
+        // Show AI processing indicator
+        setProcessingState({ type: 'ai', toolName: 'thinking...' });
+        scrollToEnd();
+        
         const command = await processUserRequest(currentHistory);
 
-        const aiThought = {
-          role: 'ai',
-          content: command,
-          timestamp: new Date().toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
-        };
-        currentHistory.push(aiThought);
-        setConversation([...currentHistory]);
+        // Update AI processing with actual tool name
+        setProcessingState({ type: 'ai', toolName: command.tool_name });
         scrollToEnd();
 
+        // Small delay to show the processing state
+        await new Promise(resolve => setTimeout(resolve, 300));
+
         if (command.tool_name === 'clarify' || command.tool_name === 'answerUser') {
+          // Clear processing state before showing final answer
+          setProcessingState(null);
+          
           const finalAnswer = {
             role: 'system',
             content: command.parameters.question || command.parameters.answer,
@@ -229,6 +291,7 @@ export default function AgentScreen() {
 
         const toolToCall = toolMapping[command.tool_name];
         if (!toolToCall) {
+          setProcessingState(null);
           const errorTurn = {
             role: 'system',
             content: `I encountered an error while processing your request. Please try again.`,
@@ -242,7 +305,15 @@ export default function AgentScreen() {
           break;
         }
 
+        // Show tool processing
+        setProcessingState({ type: 'tool' });
+        scrollToEnd();
+
         const toolResult = await toolToCall(command.parameters);
+        
+        // Clear processing state and add tool result to conversation
+        setProcessingState(null);
+        
         const toolTurn = {
           role: 'tool',
           content: toolResult,
@@ -269,6 +340,7 @@ export default function AgentScreen() {
         }
       }
     } catch (error) {
+      setProcessingState(null);
       const errorMessage = {
         role: 'system',
         content: "Something went wrong. Please try again.",
@@ -279,6 +351,7 @@ export default function AgentScreen() {
       };
       setConversation(prev => [...prev, errorMessage]);
     } finally {
+      setProcessingState(null);
       setIsLoading(false);
     }
   }, [userInput, isLoading, conversation, scrollToEnd]);
@@ -286,10 +359,9 @@ export default function AgentScreen() {
   const renderMessage = useCallback(({ item, index }) => (
     <MessageBubble 
       item={item} 
-      index={index} 
-      isLast={index === conversation.length - 1} 
+      index={index}
     />
-  ), [conversation.length]);
+  ), []);
 
   const keyExtractor = useCallback((_, index) => index.toString(), []);
 
@@ -331,7 +403,15 @@ export default function AgentScreen() {
           initialNumToRender={20}
         />
 
-        {isLoading && <TypingIndicator />}
+        {/* Show skeleton during welcome loading */}
+        {showSkeletonWelcome && <SkeletonMessage />}
+
+        {/* Show processing indicators (temporary, not in conversation history) */}
+        {processingState?.type === 'ai' && (
+          <AIProcessingIndicator toolName={processingState.toolName} />
+        )}
+        
+        {processingState?.type === 'tool' && <ToolProcessingSkeleton />}
 
         <View style={styles.inputContainer}>
           <View style={styles.inputWrapper}>
@@ -350,6 +430,7 @@ export default function AgentScreen() {
               onPress={handleUserSubmit}
               disabled={!hasText || isLoading}
               hasText={hasText}
+              isLoading={isLoading}
             />
           </View>
         </View>
@@ -418,6 +499,98 @@ const styles = StyleSheet.create({
   },
   messageContainer: { 
     marginBottom: 16,
+  },
+
+  // Skeleton Styles
+  skeletonBase: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 8,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  shimmerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    width: '30%',
+  },
+  skeletonContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+  },
+  skeletonBubbleContainer: {
+    flex: 1,
+  },
+  skeletonBubble: {
+    backgroundColor: '#FFFFFF',
+    maxWidth: width * 0.75,
+    borderRadius: 18,
+    borderBottomLeftRadius: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  skeletonToolContainer: {
+    alignItems: 'flex-start',
+    marginLeft: 44,
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+  },
+  skeletonToolBubble: {
+    backgroundColor: '#F0FDF4',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    maxWidth: width * 0.7,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+  },
+  skeletonIcon: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    overflow: 'hidden',
+  },
+
+  // Processing Indicators (temporary)
+  processingIndicatorContainer: {
+    alignItems: 'flex-start',
+    marginLeft: 44,
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+  },
+  processingBubble: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  processingDot: {
+    width: 6,
+    height: 6,
+    backgroundColor: '#3B82F6',
+    borderRadius: 3,
+    marginRight: 8,
+  },
+  processingText: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '500',
   },
 
   // User messages
@@ -494,34 +667,6 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
 
-  // Processing messages
-  processingContainer: {
-    alignItems: 'flex-start',
-    marginLeft: 44,
-  },
-  processingBubble: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  processingDot: {
-    width: 6,
-    height: 6,
-    backgroundColor: '#3B82F6',
-    borderRadius: 3,
-    marginRight: 8,
-  },
-  processingText: {
-    color: '#64748B',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-
   // Tool messages
   toolMessageContainer: {
     alignItems: 'flex-start',
@@ -544,36 +689,6 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     flex: 1,
     fontWeight: '500',
-  },
-
-  // Typing indicator
-  typingContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-  },
-  typingBubble: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    borderBottomLeftRadius: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  typingDots: {
-    flexDirection: 'row',
-  },
-  typingDot: {
-    width: 6,
-    height: 6,
-    backgroundColor: '#9CA3AF',
-    borderRadius: 3,
-    marginRight: 4,
   },
 
   // Input
@@ -618,5 +733,11 @@ const styles = StyleSheet.create({
   },
   sendButtonInactive: {
     backgroundColor: '#F3F4F6',
+  },
+  sendButtonLoader: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    overflow: 'hidden',
   },
 });
